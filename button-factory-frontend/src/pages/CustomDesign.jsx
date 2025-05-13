@@ -1,4 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 
 const CustomDesign = () => {
   const [text, setText] = useState('');
@@ -6,6 +9,154 @@ const CustomDesign = () => {
   const [bgColor, setBgColor] = useState('#ffffff');
   const [fontSize, setFontSize] = useState(16);
   const [svgFillColor, setSvgFillColor] = useState('#000000');
+
+  const mountRef = useRef(null);
+  const modelRef = useRef(null);
+  const textMeshRef = useRef(null);
+  const rendererRef = useRef(null);
+  const frameIdRef = useRef(null);
+  const controlsRef = useRef(null);
+  const cameraRef = useRef(null);
+  const sceneRef = useRef(null);
+
+  useEffect(() => {
+    const currentMount = mountRef.current;
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(bgColor);
+    sceneRef.current = scene;
+
+    // Camera setup
+    const camera = new THREE.PerspectiveCamera(
+      45,
+      currentMount.clientWidth / currentMount.clientHeight,
+      0.1,
+      1000
+    );
+    camera.position.set(0, 1, 3);
+    cameraRef.current = camera;
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(currentMount.clientWidth, currentMount.clientHeight);
+    currentMount.appendChild(renderer.domElement);
+    rendererRef.current = renderer;
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controlsRef.current = controls;
+
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    scene.add(ambientLight);
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    directionalLight.position.set(5, 10, 7.5);
+    scene.add(directionalLight);
+
+    const loader = new GLTFLoader();
+    loader.load(
+      '/button.glb',
+      (gltf) => {
+        const model = gltf.scene;
+        modelRef.current = model;
+
+        // Scale up the model
+        model.scale.set(3, 3, 3);
+
+        // Traverse model to set initial material color and log material type
+        model.traverse((child) => {
+          if (child.isMesh) {
+            console.log('Material type:', child.material.type);
+            child.material = child.material.clone();
+            child.material.color.set(svgFillColor);
+            child.material.needsUpdate = true;
+          }
+        });
+
+        scene.add(model);
+
+        addOrUpdateTextMesh(text, color, fontSize, scene);
+      },
+      undefined,
+      (error) => {
+        console.error('Error loading model:', error);
+      }
+    );
+
+    const animate = () => {
+      frameIdRef.current = requestAnimationFrame(animate);
+      if (modelRef.current) {
+        modelRef.current.rotation.y += 0.01;
+      }
+      controls.update();
+      renderer.render(scene, camera);
+    };
+
+    renderer.setClearColor(new THREE.Color(bgColor), 1);
+    animate();
+
+    return () => {
+      cancelAnimationFrame(frameIdRef.current);
+      controls.dispose();
+      renderer.dispose();
+      currentMount.removeChild(renderer.domElement);
+    };
+  }, [bgColor, svgFillColor]);
+
+  // Function to add or update 3D text mesh
+  const addOrUpdateTextMesh = (text, color, fontSize, scene) => {
+    if (textMeshRef.current) {
+      scene.remove(textMeshRef.current);
+      textMeshRef.current.geometry.dispose();
+      textMeshRef.current.material.dispose();
+      textMeshRef.current = null;
+    }
+
+    if (!text) return;
+
+    // Create canvas for text texture
+    const canvas = document.createElement('canvas');
+    const size = 512;
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, size, size);
+    ctx.font = `${fontSize * 10}px Arial`;
+    ctx.fillStyle = color;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, size / 2, size / 2);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+
+    const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true });
+    const geometry = new THREE.PlaneGeometry(1.5, 1.5);
+    const mesh = new THREE.Mesh(geometry, material);
+
+    mesh.position.set(0, 0.8, 0);
+    mesh.rotation.x = -0.3;
+
+    scene.add(mesh);
+    textMeshRef.current = mesh;
+  };
+
+  useEffect(() => {
+    if (sceneRef.current) {
+      addOrUpdateTextMesh(text, color, fontSize, sceneRef.current);
+    }
+  }, [text, color, fontSize]);
+
+  // Update model color when svgFillColor changes
+  useEffect(() => {
+    if (modelRef.current) {
+      modelRef.current.traverse((child) => {
+        if (child.isMesh) {
+          child.material.color.set(svgFillColor);
+          child.material.needsUpdate = true;
+        }
+      });
+    }
+  }, [svgFillColor]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -80,49 +231,15 @@ const CustomDesign = () => {
       <div style={{ marginTop: '2rem' }}>
         <h2>Preview:</h2>
         <div
+          ref={mountRef}
           style={{
-            position: 'relative',
-            display: 'inline-block',
-            width: '200px',
-            height: '200px',
+            width: '400px',
+            height: '400px',
             backgroundColor: bgColor,
             borderRadius: '8px',
             border: '1px solid #ccc',
-            textAlign: 'center',
-            verticalAlign: 'middle',
-            fontSize: fontSize + 'px',
-            color: color,
-            fontWeight: 'bold',
-            userSelect: 'none',
-            lineHeight: '200px',
           }}
-        >
-          <svg
-            width="100%"
-            height="100%"
-            viewBox="0 0 512 512"
-            xmlns="http://www.w3.org/2000/svg"
-            style={{ position: 'absolute', top: 0, left: 0, zIndex: 0 }}
-          >
-            <path
-              fill={svgFillColor}
-              d="M255.4 31.96a224 224 0 0 0-62.1 8.96A224 224 0 0 0 40.97 318.7 224 224 0 0 0 318.7 471 224 224 0 0 0 471 193.2 224 224 0 0 0 256 31.96a224 224 0 0 0-.6 0zm-.6 38.97c80.5-.56 155.1 52.07 178.8 133.27 28.6 98-27.8 200.8-125.8 229.4-98 28.5-200.8-27.8-229.39-125.8C49.82 209.7 106.2 106.9 204.2 78.36c16.8-4.91 33.8-7.32 50.6-7.43zm.1 17.98c-15.1.11-30.5 2.29-45.7 6.73C120.6 121.5 69.84 214.1 95.69 302.7 121.5 391.3 214.1 442.1 302.8 416.3c88.6-25.9 139.4-118.5 113.5-207.1-21.4-73.4-88.5-120.83-161.4-120.29zm45 62.69c10.7.2 20.5 7.3 23.6 18 3.9 13.1-3.8 27.2-17 31-13.1 3.8-27.1-3.9-31-17-3.8-13.2 3.9-27.2 17-31 2.5-.7 5-1 7.4-1zm-.2 18c-.7 0-1.4.1-2.1.3-3.9 1.1-5.9 4.8-4.8 8.7 1.1 3.8 4.8 5.8 8.7 4.7 3.8-1.1 5.9-4.8 4.7-8.7-.9-3.1-3.5-5-6.5-5zm-124.5 17.9h1.9c10.6.2 20.4 7.3 23.5 17.9 3.9 13.2-3.8 27.2-17 31-13.1 3.9-27.1-3.8-31-17-3.8-13.1 3.9-27.1 17-31 1.9-.5 3.7-.8 5.6-.9zm1.6 17.9c-.7 0-1.4.1-2.1.3-3.9 1.1-5.9 4.9-4.8 8.7 1.1 3.8 4.9 5.9 8.7 4.8 3.8-1.2 5.9-4.9 4.8-8.7-.9-3.1-3.6-5.1-6.6-5.1zm159 69.1c10.6.2 20.5 7.3 23.6 18 3.8 13.1-3.9 27.1-17 31-13.2 3.8-27.2-3.9-31-17-3.9-13.2 3.8-27.2 17-31 2.4-.7 4.9-1.1 7.4-1zm-.8 18c-.6 0-1.1.1-1.6.3-3.8 1.1-5.9 4.8-4.8 8.6 1.2 3.9 4.9 5.9 8.7 4.8 3.9-1.1 5.9-4.8 4.8-8.7-.9-3.1-3.6-5-6.6-5h-.5zm-122.1 17.8c10.6.3 20.5 7.3 23.6 18 3.8 13.2-3.9 27.2-17 31-13.2 3.9-27.2-3.8-31-17-3.8-13.1 3.8-27.1 17-31 2.5-.7 4.9-1 7.4-1zm-.2 18c-.7 0-1.5.1-2.2.3-3.8 1.1-5.9 4.8-4.7 8.7 1.1 3.8 4.8 5.9 8.6 4.7 3.9-1.1 5.9-4.8 4.8-8.6-.9-3.2-3.5-5.1-6.5-5.1z"
-            />
-          </svg>
-          <span
-            style={{
-              position: 'relative',
-              zIndex: 1,
-              lineHeight: '200px',
-              pointerEvents: 'none',
-              userSelect: 'none',
-              display: 'inline-block',
-              width: '100%',
-            }}
-          >
-            {text || 'Button Text'}
-          </span>
-        </div>
+        />
       </div>
     </div>
   );
